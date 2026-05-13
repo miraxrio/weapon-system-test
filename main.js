@@ -939,6 +939,7 @@ const sbomItar = document.getElementById("sbom-itar");
 let asmRenderer = null;
 let asmScene = null;
 let asmCamera = null;
+let asmControls = null;
 let asmModel = null;
 let asmSectionGroups = [];   // [{ group, label, color, baseZ }]
 let asmRaf = 0;
@@ -970,6 +971,27 @@ function initAssemblyScene() {
   asmCamera = new THREE.PerspectiveCamera(28, 1, 0.05, 200);
   asmCamera.position.set(0.3, 0.4, 15);
   asmCamera.lookAt(0, 0, 0);
+
+  // Same control scheme as the main hangar view (LMB rotate, wheel zoom,
+  // RMB pan), plus a gentle auto-rotation during the intro so the user
+  // sees the assembly from multiple angles without having to drag.
+  asmControls = new OrbitControls(asmCamera, assemblyCanvas);
+  asmControls.enableDamping = true;
+  asmControls.dampingFactor = 0.08;
+  asmControls.minDistance = 5;
+  asmControls.maxDistance = 30;
+  asmControls.target.set(0, 0, 0);
+  asmControls.mouseButtons = {
+    LEFT: THREE.MOUSE.ROTATE,
+    MIDDLE: THREE.MOUSE.DOLLY,
+    RIGHT: THREE.MOUSE.PAN,
+  };
+  asmControls.autoRotate = true;
+  asmControls.autoRotateSpeed = 0.6;
+  // Any user interaction stops the auto-rotate so it doesn't fight the user.
+  ["pointerdown", "wheel"].forEach((ev) =>
+    assemblyCanvas.addEventListener(ev, () => { if (asmControls) asmControls.autoRotate = false; })
+  );
 
   resizeAssembly();
 }
@@ -1268,14 +1290,11 @@ function runAssemblyLoop() {
       explodeAssembly(e);
       assemblyStage.textContent = e < 1
         ? `Separating ${asmSectionGroups.length} sections… ${Math.round(e * 100)}%`
-        : "Assembly resolved · pulling Software Bill of Materials";
+        : "Assembly resolved · LMB orbit · Wheel zoom · RMB pan";
       if (p >= 1) asmExploded = true;
     }
 
-    // Slow rotation of the entire assembly stack.
-    const rot = Math.min(1, elapsed / 4000) * 0.6 + (elapsed / 1000) * 0.05;
-    for (const r of asmSectionGroups) r.group.rotation.y = rot;
-
+    if (asmControls) asmControls.update();
     updateAssemblyLabels();
     if (!labelsShown && elapsed > 250) {
       showLabels();
@@ -1304,6 +1323,12 @@ function openAssembly() {
     buildAssemblyModel();
     createLabels();
     hideLabels();
+    if (asmControls) {
+      asmCamera.position.set(0.3, 0.4, 15);
+      asmControls.target.set(0, 0, 0);
+      asmControls.autoRotate = true;
+      asmControls.update();
+    }
     asmExploded = false;
     asmStartTime = performance.now();
     runAssemblyLoop();
@@ -1316,6 +1341,7 @@ function closeAssembly() {
   sbomPanel.classList.remove("visible");
   cancelAnimationFrame(asmRaf);
   asmRaf = 0;
+  if (asmControls) asmControls.autoRotate = false;
 }
 
 assemblyCloseBtn.addEventListener("click", closeAssembly);
