@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { Sky } from "three/addons/objects/Sky.js";
 import { WEAPON_DATA, WEAPON_ORDER } from "./weapons.js";
 
 const canvas = document.getElementById("scene");
@@ -26,32 +25,59 @@ const renderer = new THREE.WebGLRenderer({
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xb0c4e0, 70, 180);
+scene.fog = new THREE.Fog(0x9ed0ff, 80, 220);
 
 const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
 camera.position.set(14, 8, 16);
 
 // ---------------------------------------------------------------------------
-// Sky / environment
+// Sky / environment — custom deep-blue gradient dome (lets us hit a much
+// bluer sky than the physical Sky model's hazy horizon allows).
 // ---------------------------------------------------------------------------
-const sky = new Sky();
-sky.scale.setScalar(1200);
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  depthWrite: false,
+  uniforms: {
+    uTop: { value: new THREE.Color(0x0b2f80) },
+    uMid: { value: new THREE.Color(0x1a66cc) },
+    uHoriz: { value: new THREE.Color(0x6fb0ec) },
+  },
+  vertexShader: /* glsl */ `
+    varying vec3 vWorldDir;
+    void main() {
+      vWorldDir = normalize((modelMatrix * vec4(position, 1.0)).xyz);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    varying vec3 vWorldDir;
+    uniform vec3 uTop;
+    uniform vec3 uMid;
+    uniform vec3 uHoriz;
+    void main() {
+      float h = clamp(vWorldDir.y, -0.2, 1.0);
+      vec3 col;
+      if (h < 0.25) {
+        col = mix(uHoriz, uMid, smoothstep(0.0, 0.25, h));
+      } else {
+        col = mix(uMid, uTop, smoothstep(0.25, 0.9, h));
+      }
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+});
+const sky = new THREE.Mesh(new THREE.SphereGeometry(800, 32, 16), skyMat);
+sky.renderOrder = -1;
 scene.add(sky);
 
-const skyUniforms = sky.material.uniforms;
-skyUniforms.turbidity.value = 3.5;
-skyUniforms.rayleigh.value = 3.8;
-skyUniforms.mieCoefficient.value = 0.003;
-skyUniforms.mieDirectionalG.value = 0.8;
-
-const sunSpherical = new THREE.Spherical(1, THREE.MathUtils.degToRad(58), THREE.MathUtils.degToRad(40));
-const sunVec = new THREE.Vector3().setFromSpherical(sunSpherical);
-skyUniforms.sunPosition.value.copy(sunVec);
+// Sun direction is still used to align the directional light.
+const sunVec = new THREE.Vector3()
+  .setFromSpherical(new THREE.Spherical(1, THREE.MathUtils.degToRad(45), THREE.MathUtils.degToRad(60)));
 
 // Distinct fluffy clouds as camera-facing sprites scattered overhead.
 function makeCloudPuffTexture() {
@@ -121,10 +147,11 @@ for (let i = 0; i < cloudCount; i++) {
 }
 scene.add(cloudsGroup);
 
+// Keep the Sky mesh itself as the visible background (sharp gradient + sun);
+// PMREM-blurred environment is only used for PBR lighting.
 const pmrem = new THREE.PMREMGenerator(renderer);
 const envRT = pmrem.fromScene(sky, 0.04);
 scene.environment = envRT.texture;
-scene.background = envRT.texture;
 
 // ---------------------------------------------------------------------------
 // Lights
@@ -448,6 +475,7 @@ function loadAircraft() {
           aircraftAction = aircraftMixer.clipAction(clip);
           aircraftAction.setLoop(THREE.LoopPingPong, Infinity);
           aircraftAction.clampWhenFinished = false;
+          aircraftAction.timeScale = 0.45;
           aircraftAction.play();
         }
 
@@ -690,10 +718,10 @@ function tick() {
 
   if (aircraftMixer) aircraftMixer.update(dt);
 
-  // Subtle hover close to the ground — complements the rig's ping-pong cycle.
+  // Subtle hover that just kisses the tarmac — complements the rig animation.
   if (aircraftGroup.children.length) {
     const t = performance.now() * 0.001;
-    aircraftGroup.position.y = Math.sin(t * 1.2) * 0.12 + 0.12;
+    aircraftGroup.position.y = Math.sin(t * 0.9) * 0.04 + 0.04;
     aircraftGroup.rotation.y = Math.sin(t * 0.05) * 0.01;
   }
 
