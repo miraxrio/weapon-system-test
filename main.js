@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { Sky } from "three/addons/objects/Sky.js";
 import { WEAPON_DATA, WEAPON_ORDER } from "./weapons.js";
 
 const canvas = document.getElementById("scene");
@@ -31,82 +31,217 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a1014);
-scene.fog = new THREE.Fog(0x0a1014, 35, 95);
+scene.fog = new THREE.Fog(0xb0c4e0, 70, 180);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
+camera.position.set(14, 8, 16);
+
+// ---------------------------------------------------------------------------
+// Sky / environment
+// ---------------------------------------------------------------------------
+const sky = new Sky();
+sky.scale.setScalar(1200);
+scene.add(sky);
+
+const skyUniforms = sky.material.uniforms;
+skyUniforms.turbidity.value = 8;
+skyUniforms.rayleigh.value = 2.2;
+skyUniforms.mieCoefficient.value = 0.004;
+skyUniforms.mieDirectionalG.value = 0.85;
+
+const sunSpherical = new THREE.Spherical(1, THREE.MathUtils.degToRad(72), THREE.MathUtils.degToRad(40));
+const sunVec = new THREE.Vector3().setFromSpherical(sunSpherical);
+skyUniforms.sunPosition.value.copy(sunVec);
 
 const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.6).texture;
-
-const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 500);
-camera.position.set(14, 8, 16);
+const envRT = pmrem.fromScene(sky, 0.04);
+scene.environment = envRT.texture;
+scene.background = envRT.texture;
 
 // ---------------------------------------------------------------------------
 // Lights
 // ---------------------------------------------------------------------------
-const hemi = new THREE.HemisphereLight(0xbfd4ff, 0x1a1208, 0.45);
+const hemi = new THREE.HemisphereLight(0xa6c8ff, 0x4d3a1f, 0.55);
 scene.add(hemi);
 
-const keyLight = new THREE.DirectionalLight(0xfff1d0, 2.1);
-keyLight.position.set(14, 20, 10);
-keyLight.castShadow = true;
-keyLight.shadow.mapSize.set(2048, 2048);
-keyLight.shadow.camera.near = 1;
-keyLight.shadow.camera.far = 60;
-keyLight.shadow.camera.left = -22;
-keyLight.shadow.camera.right = 22;
-keyLight.shadow.camera.top = 22;
-keyLight.shadow.camera.bottom = -22;
-keyLight.shadow.bias = -0.0005;
-scene.add(keyLight);
+// Sunlight aligned with the sky's sun direction.
+const sun = new THREE.DirectionalLight(0xfff4d6, 2.4);
+sun.position.copy(sunVec).multiplyScalar(30);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 80;
+sun.shadow.camera.left = -24;
+sun.shadow.camera.right = 24;
+sun.shadow.camera.top = 24;
+sun.shadow.camera.bottom = -24;
+sun.shadow.bias = -0.0005;
+scene.add(sun);
 
-const rimLight = new THREE.DirectionalLight(0x88aaff, 0.8);
-rimLight.position.set(-12, 8, -14);
-scene.add(rimLight);
+const rim = new THREE.DirectionalLight(0x88aaff, 0.5);
+rim.position.set(-12, 8, -14);
+scene.add(rim);
 
-const fillLight = new THREE.DirectionalLight(0xffaf6b, 0.35);
-fillLight.position.set(-10, 4, 12);
-scene.add(fillLight);
-
-// Subtle accent spot from above to mimic hangar spotlight on the jet.
-const spot = new THREE.SpotLight(0xfff2c2, 1.2, 60, Math.PI / 6, 0.5, 1.2);
-spot.position.set(0, 22, 0);
-spot.target.position.set(0, 0, 0);
-scene.add(spot);
-scene.add(spot.target);
+const bounce = new THREE.DirectionalLight(0xffc080, 0.35);
+bounce.position.set(-10, 2, 12);
+scene.add(bounce);
 
 // ---------------------------------------------------------------------------
-// Ground (hangar floor)
+// Ground — colorful tarmac painted procedurally on a canvas texture.
 // ---------------------------------------------------------------------------
-const floorGeo = new THREE.CircleGeometry(40, 96);
+function makeTarmacTexture() {
+  const size = 1024;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d");
+
+  // Radial sunlit base — warm orange near the centre fading to slate-teal.
+  const grad = g.createRadialGradient(size / 2, size / 2, 60, size / 2, size / 2, size * 0.55);
+  grad.addColorStop(0.0, "#3a5d6e");
+  grad.addColorStop(0.45, "#244258");
+  grad.addColorStop(1.0, "#101a26");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+
+  // Cool concrete pattern — slabs with grout lines.
+  const slab = 80;
+  g.strokeStyle = "rgba(255,255,255,0.04)";
+  g.lineWidth = 2;
+  for (let x = 0; x <= size; x += slab) {
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.lineTo(x, size);
+    g.stroke();
+  }
+  for (let y = 0; y <= size; y += slab) {
+    g.beginPath();
+    g.moveTo(0, y);
+    g.lineTo(size, y);
+    g.stroke();
+  }
+
+  // Splotchy weathering noise.
+  for (let i = 0; i < 1600; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 4 + Math.random() * 18;
+    const a = 0.02 + Math.random() * 0.05;
+    g.fillStyle = `rgba(${180 + Math.random() * 70 | 0}, ${120 + Math.random() * 80 | 0}, ${70 + Math.random() * 60 | 0}, ${a})`;
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  // Hazard chevrons along the bottom edge — yellow/black caution stripe.
+  g.save();
+  g.translate(0, size - 80);
+  for (let x = -80; x < size + 80; x += 60) {
+    g.fillStyle = "#f0b020";
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.lineTo(x + 30, 0);
+    g.lineTo(x + 60, 80);
+    g.lineTo(x + 30, 80);
+    g.closePath();
+    g.fill();
+    g.fillStyle = "#181818";
+    g.beginPath();
+    g.moveTo(x + 30, 0);
+    g.lineTo(x + 60, 0);
+    g.lineTo(x + 90, 80);
+    g.lineTo(x + 60, 80);
+    g.closePath();
+    g.fill();
+  }
+  g.restore();
+
+  // Centred runway-style aim marker (white + red dot).
+  g.strokeStyle = "rgba(255,255,255,0.55)";
+  g.lineWidth = 8;
+  g.beginPath();
+  g.arc(size / 2, size / 2, 70, 0, Math.PI * 2);
+  g.stroke();
+  g.fillStyle = "rgba(220, 70, 50, 0.65)";
+  g.beginPath();
+  g.arc(size / 2, size / 2, 18, 0, Math.PI * 2);
+  g.fill();
+
+  // White cross-hair.
+  g.strokeStyle = "rgba(255,255,255,0.35)";
+  g.lineWidth = 4;
+  g.beginPath();
+  g.moveTo(size / 2 - 110, size / 2);
+  g.lineTo(size / 2 - 30, size / 2);
+  g.moveTo(size / 2 + 30, size / 2);
+  g.lineTo(size / 2 + 110, size / 2);
+  g.moveTo(size / 2, size / 2 - 110);
+  g.lineTo(size / 2, size / 2 - 30);
+  g.moveTo(size / 2, size / 2 + 30);
+  g.lineTo(size / 2, size / 2 + 110);
+  g.stroke();
+
+  // Stencilled text panels around the perimeter.
+  g.fillStyle = "rgba(255,255,255,0.32)";
+  g.font = "bold 44px 'Roboto Condensed', sans-serif";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  const labels = ["HANGAR 03", "DANGER", "ARMED", "FOD ZONE"];
+  labels.forEach((t, i) => {
+    const a = (i / labels.length) * Math.PI * 2 + Math.PI / 4;
+    const x = size / 2 + Math.cos(a) * size * 0.34;
+    const y = size / 2 + Math.sin(a) * size * 0.34;
+    g.save();
+    g.translate(x, y);
+    g.rotate(a + Math.PI / 2);
+    g.fillText(t, 0, 0);
+    g.restore();
+  });
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+const tarmacTex = makeTarmacTexture();
+const floorGeo = new THREE.CircleGeometry(40, 128);
 const floorMat = new THREE.MeshStandardMaterial({
-  color: 0x1a1f24,
-  roughness: 0.85,
-  metalness: 0.1,
+  map: tarmacTex,
+  roughness: 0.78,
+  metalness: 0.05,
 });
 const floor = new THREE.Mesh(floorGeo, floorMat);
 floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 scene.add(floor);
 
+// Far grass apron — a wider plane to fill horizon under the sky.
+const apronMat = new THREE.MeshStandardMaterial({
+  color: 0x4f6b3a,
+  roughness: 0.95,
+  metalness: 0,
+});
+const apron = new THREE.Mesh(new THREE.CircleGeometry(400, 64), apronMat);
+apron.rotation.x = -Math.PI / 2;
+apron.position.y = -0.02;
+apron.receiveShadow = true;
+scene.add(apron);
+
 const ring = new THREE.Mesh(
-  new THREE.RingGeometry(11.6, 11.8, 128),
-  new THREE.MeshBasicMaterial({ color: 0xffb84a, side: THREE.DoubleSide, transparent: true, opacity: 0.18 })
+  new THREE.RingGeometry(11.6, 11.85, 128),
+  new THREE.MeshBasicMaterial({ color: 0xffd368, side: THREE.DoubleSide, transparent: true, opacity: 0.55 })
 );
 ring.rotation.x = -Math.PI / 2;
-ring.position.y = 0.01;
+ring.position.y = 0.02;
 scene.add(ring);
 
 const innerRing = new THREE.Mesh(
-  new THREE.RingGeometry(6.0, 6.08, 128),
-  new THREE.MeshBasicMaterial({ color: 0xffb84a, side: THREE.DoubleSide, transparent: true, opacity: 0.1 })
+  new THREE.RingGeometry(6.0, 6.1, 128),
+  new THREE.MeshBasicMaterial({ color: 0xffd368, side: THREE.DoubleSide, transparent: true, opacity: 0.35 })
 );
 innerRing.rotation.x = -Math.PI / 2;
-innerRing.position.y = 0.01;
+innerRing.position.y = 0.02;
 scene.add(innerRing);
-
-const grid = new THREE.GridHelper(60, 60, 0x223038, 0x101418);
-grid.position.y = 0.005;
-scene.add(grid);
 
 // ---------------------------------------------------------------------------
 // Controls
@@ -223,6 +358,9 @@ function makeStand() {
   return group;
 }
 
+let aircraftMixer = null;
+let aircraftAction = null;
+
 function loadAircraft() {
   return new Promise((resolve, reject) => {
     loader.load(
@@ -232,6 +370,19 @@ function loadAircraft() {
         aircraftGroup.add(root);
         frameObject(root, 11.5); // target wingspan ~11.5 units
         enableShadows(root);
+
+        // Play the bundled "F-15|ArmatureAction" clip on a loop.
+        const clip =
+          THREE.AnimationClip.findByName(gltf.animations, "F-15|ArmatureAction") ??
+          gltf.animations[0];
+        if (clip) {
+          aircraftMixer = new THREE.AnimationMixer(root);
+          aircraftAction = aircraftMixer.clipAction(clip);
+          aircraftAction.setLoop(THREE.LoopRepeat, Infinity);
+          aircraftAction.clampWhenFinished = false;
+          aircraftAction.play();
+        }
+
         resolve(root);
       },
       onProgress("aircraft"),
@@ -469,9 +620,13 @@ function tick() {
     }
   }
 
-  // Gentle idle bob for the aircraft canopy/nose to give some life.
+  if (aircraftMixer) aircraftMixer.update(dt);
+
+  // Visible up/down loop — gentle hover that complements the rig animation.
   if (aircraftGroup.children.length) {
-    aircraftGroup.rotation.y = Math.sin(performance.now() * 0.00005) * 0.005;
+    const t = performance.now() * 0.001;
+    aircraftGroup.position.y = Math.sin(t * 1.2) * 0.55 + 0.55;
+    aircraftGroup.rotation.y = Math.sin(t * 0.05) * 0.01;
   }
 
   renderer.render(scene, camera);
