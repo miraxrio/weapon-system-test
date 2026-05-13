@@ -4,6 +4,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import * as L from "./vendor/leaflet/leaflet.esm.js";
 import { WEAPON_DATA, WEAPON_ORDER } from "./weapons.js";
 import { ARMORY } from "./armory.js";
+import { AIM9M_SBOM } from "./sbom.js";
 
 const canvas = document.getElementById("scene");
 const tooltipEl = document.getElementById("tooltip");
@@ -501,6 +502,8 @@ function loadAircraft() {
 }
 
 const weaponRefs = []; // [{ root, info, targetable: THREE.Object3D }]
+let aim9mGlowMaterials = []; // emissive materials we'll pulse each frame
+let aim9mDetailedSource = null; // pristine clone of the detailed model, for the assembly viewer
 
 function loadWeapons() {
   return new Promise((resolve, reject) => {
@@ -604,6 +607,75 @@ function loadWeapons() {
         resolve();
       },
       onProgress("missiles"),
+      reject
+    );
+  });
+}
+
+// Swap the AIM-9 Sidewinder slot for the high-detail AIM-9M model and tint
+// it with a pulsing glow so it visually pops as the "featured" weapon.
+function loadAim9mDetailed() {
+  return new Promise((resolve, reject) => {
+    loader.load(
+      "assets/aim9m.glb",
+      (gltf) => {
+        const source = gltf.scene;
+        aim9mDetailedSource = source;
+
+        const slot = weaponRefs.find((w) => w.key === "AIM-9 Sidewinder");
+        if (!slot) return resolve();
+
+        // Take a copy for the in-ring slot; keep the original for the assembly view.
+        const replacement = source.clone(true);
+        replacement.position.set(0, 0, 0);
+        replacement.rotation.set(0, 0, 0);
+        replacement.scale.set(1, 1, 1);
+
+        // Normalize: center, longest-axis-along-Z, target size, sit on cradle.
+        {
+          const b = new THREE.Box3().setFromObject(replacement);
+          const c = new THREE.Vector3(); b.getCenter(c);
+          replacement.position.sub(c);
+
+          const s = new THREE.Vector3(); b.getSize(s);
+          if (s.x > s.z && s.x >= s.y) replacement.rotation.y += Math.PI / 2;
+          else if (s.y > s.z && s.y > s.x) replacement.rotation.x += Math.PI / 2;
+
+          const b2 = new THREE.Box3().setFromObject(replacement);
+          const s2 = new THREE.Vector3(); b2.getSize(s2);
+          const longest = Math.max(s2.x, s2.y, s2.z);
+          replacement.scale.setScalar(2.6 / longest);
+
+          const b3 = new THREE.Box3().setFromObject(replacement);
+          replacement.position.y -= b3.min.y;
+          replacement.position.y += 0.7;
+        }
+
+        // Apply the pulsing accent emissive — collect materials so the tick
+        // loop can pulse them in sync.
+        aim9mGlowMaterials.length = 0;
+        replacement.traverse((obj) => {
+          if (!obj.isMesh) return;
+          obj.castShadow = true;
+          obj.receiveShadow = true;
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+          mats.forEach((m) => {
+            if (!m || !("emissive" in m)) return;
+            m.emissive = new THREE.Color(0xffb84a);
+            m.emissiveIntensity = 0.6;
+            m.toneMapped = true;
+            aim9mGlowMaterials.push(m);
+          });
+        });
+
+        // Replace the in-ring clone.
+        slot.root.remove(slot.clone);
+        slot.root.add(replacement);
+        slot.clone = replacement;
+
+        resolve();
+      },
+      undefined,
       reject
     );
   });
@@ -845,9 +917,402 @@ mapModal.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (!mapModal.classList.contains("hidden")) closeMap();
+  if (!assemblyModal.classList.contains("hidden")) closeAssembly();
+  else if (!mapModal.classList.contains("hidden")) closeMap();
   else if (!panelEl.classList.contains("closed")) closePanel();
 });
+
+// ---------------------------------------------------------------------------
+// Right-click → AIM-9M assembly viewer (independent Three.js scene + SBOM)
+// ---------------------------------------------------------------------------
+const assemblyModal = document.getElementById("assembly-modal");
+const assemblyCloseBtn = document.getElementById("assembly-close");
+const assemblyCanvas = document.getElementById("assembly-canvas");
+const assemblyLabels = document.getElementById("assembly-labels");
+const assemblyStage = document.getElementById("assembly-stage");
+const sbomPanel = document.getElementById("sbom-panel");
+const sbomList = document.getElementById("sbom-list");
+const sbomBuild = document.getElementById("sbom-build");
+const sbomNcage = document.getElementById("sbom-ncage");
+const sbomItar = document.getElementById("sbom-itar");
+
+let asmRenderer = null;
+let asmScene = null;
+let asmCamera = null;
+let asmModel = null;
+let asmSectionGroups = [];   // [{ group, label, color, baseZ }]
+let asmRaf = 0;
+let asmStartTime = 0;
+let asmExploded = false;
+
+function initAssemblyScene() {
+  if (asmRenderer) return;
+  asmRenderer = new THREE.WebGLRenderer({ canvas: assemblyCanvas, antialias: true, alpha: true });
+  asmRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  asmRenderer.outputColorSpace = THREE.SRGBColorSpace;
+  asmRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+  asmRenderer.toneMappingExposure = 1.1;
+
+  asmScene = new THREE.Scene();
+  asmScene.background = null; // shows the radial CSS gradient behind
+
+  const hemiA = new THREE.HemisphereLight(0xcfe2ff, 0x2a2436, 1.0);
+  asmScene.add(hemiA);
+  const ambA = new THREE.AmbientLight(0xffffff, 0.4);
+  asmScene.add(ambA);
+  const keyA = new THREE.DirectionalLight(0xfff4d6, 1.8);
+  keyA.position.set(8, 6, 9);
+  asmScene.add(keyA);
+  const rimA = new THREE.DirectionalLight(0x80aaff, 0.65);
+  rimA.position.set(-8, 3, -6);
+  asmScene.add(rimA);
+
+  asmCamera = new THREE.PerspectiveCamera(35, 1, 0.05, 200);
+  asmCamera.position.set(0, 0.6, 9);
+
+  resizeAssembly();
+}
+
+function resizeAssembly() {
+  if (!asmRenderer) return;
+  const w = assemblyCanvas.clientWidth;
+  const h = assemblyCanvas.clientHeight;
+  asmRenderer.setSize(w, h, false);
+  asmCamera.aspect = w / h;
+  asmCamera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resizeAssembly);
+
+function buildAssemblyModel() {
+  if (!aim9mDetailedSource) return;
+
+  if (asmModel) {
+    asmScene.remove(asmModel);
+    asmModel.traverse((o) => {
+      if (o.geometry) o.geometry.dispose?.();
+      if (o.material) {
+        const ms = Array.isArray(o.material) ? o.material : [o.material];
+        ms.forEach((m) => m.dispose?.());
+      }
+    });
+  }
+  asmSectionGroups.length = 0;
+
+  const model = aim9mDetailedSource.clone(true);
+  model.position.set(0, 0, 0);
+  model.rotation.set(0, 0, 0);
+  model.scale.set(1, 1, 1);
+
+  // Normalize: center; longest axis along X (broadside to camera); target size.
+  let b = new THREE.Box3().setFromObject(model);
+  const center = new THREE.Vector3(); b.getCenter(center);
+  model.position.sub(center);
+
+  const size = new THREE.Vector3(); b.getSize(size);
+  if (size.z > size.x && size.z >= size.y) model.rotation.y += Math.PI / 2;
+  else if (size.y > size.x && size.y > size.z) model.rotation.z += Math.PI / 2;
+
+  b = new THREE.Box3().setFromObject(model);
+  const sz = new THREE.Vector3(); b.getSize(sz);
+  const longest = Math.max(sz.x, sz.y, sz.z);
+  const targetLen = 6.5;
+  model.scale.setScalar(targetLen / longest);
+
+  // Re-center after scale.
+  b = new THREE.Box3().setFromObject(model);
+  const cc = new THREE.Vector3(); b.getCenter(cc);
+  model.position.sub(cc);
+
+  // Apply a subtle base material treatment + give each mesh a clone so we
+  // can recolour by section without affecting the ring instance.
+  model.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    if (Array.isArray(obj.material)) {
+      obj.material = obj.material.map((m) => m.clone?.() ?? m);
+    } else {
+      obj.material = obj.material.clone?.() ?? obj.material;
+    }
+    obj.castShadow = false;
+    obj.receiveShadow = false;
+    obj.visible = true;
+  });
+
+  asmScene.add(model);
+  asmModel = model;
+
+  // Group meshes into SBOM sections by world-X position (along the missile's
+  // long axis after normalisation). The SBOM definition is ordered nose → tail.
+  const sections = AIM9M_SBOM.sections;
+  const bbox = new THREE.Box3().setFromObject(model);
+  const xMin = bbox.min.x;
+  const xMax = bbox.max.x;
+  const xLen = xMax - xMin;
+
+  // Allocate non-uniform buckets — nose-heavy electronics get smaller slices,
+  // motor + fins get larger ones. Weights sum to 1.
+  const weights = [0.18, 0.16, 0.16, 0.30, 0.12, 0.08]; // seeker..fins
+  while (weights.length < sections.length) weights.push(1 / sections.length);
+  const edges = [xMin];
+  let acc = 0;
+  for (let i = 0; i < sections.length; i++) {
+    acc += weights[i];
+    edges.push(xMin + xLen * acc);
+  }
+
+  for (let i = 0; i < sections.length; i++) {
+    const grp = new THREE.Group();
+    grp.userData.sectionId = sections[i].id;
+    grp.userData.color = sections[i].color;
+    grp.userData.label = sections[i].label;
+    asmScene.add(grp);
+    asmSectionGroups.push({ group: grp, sectionIndex: i, color: sections[i].color, label: sections[i].label, originX: 0, targetX: 0 });
+  }
+
+  // Reassign each leaf mesh to its bucket group (preserve world transform).
+  const buckets = asmSectionGroups.map(() => []);
+  const tmp = new THREE.Vector3();
+  model.traverse((obj) => {
+    if (!obj.isMesh) return;
+    obj.getWorldPosition(tmp);
+    let bucket = sections.length - 1;
+    for (let i = 0; i < sections.length; i++) {
+      if (tmp.x <= edges[i + 1]) { bucket = i; break; }
+    }
+    buckets[bucket].push(obj);
+  });
+
+  for (let i = 0; i < buckets.length; i++) {
+    const grp = asmSectionGroups[i].group;
+    let sx = 0, count = 0;
+    for (const mesh of buckets[i]) {
+      mesh.getWorldPosition(tmp);
+      sx += tmp.x; count++;
+      grp.attach(mesh); // preserves world transform
+    }
+    grp.userData.centerX = count ? sx / count : 0;
+    asmSectionGroups[i].originX = grp.position.x;
+
+    // Recolour each section's emissive so the explode reads visually.
+    const color = new THREE.Color(asmSectionGroups[i].color);
+    grp.traverse((m) => {
+      if (!m.isMesh || !m.material) return;
+      const ms = Array.isArray(m.material) ? m.material : [m.material];
+      ms.forEach((mat) => {
+        if (!("emissive" in mat)) return;
+        mat.emissive = color.clone();
+        mat.emissiveIntensity = 0.25;
+      });
+    });
+  }
+
+  // Empty the now-childless root so the model isn't double-rendered.
+  asmScene.remove(model);
+}
+
+function explodeAssembly(progress) {
+  // progress: 0 (assembled) → 1 (fully exploded)
+  const sep = 1.8; // total spacing between adjacent sections at full explode
+  const center = (asmSectionGroups.length - 1) / 2;
+  for (let i = 0; i < asmSectionGroups.length; i++) {
+    const ref = asmSectionGroups[i];
+    const offset = (i - center) * sep * progress;
+    ref.group.position.x = ref.originX + offset;
+  }
+}
+
+function projectToScreen(worldPoint) {
+  const v = worldPoint.clone().project(asmCamera);
+  const rect = assemblyCanvas.getBoundingClientRect();
+  return {
+    x: rect.left + (v.x * 0.5 + 0.5) * rect.width,
+    y: rect.top + (-v.y * 0.5 + 0.5) * rect.height,
+  };
+}
+
+function updateAssemblyLabels() {
+  if (!asmModel && !asmSectionGroups.length) return;
+  for (let i = 0; i < asmSectionGroups.length; i++) {
+    const ref = asmSectionGroups[i];
+    const labelEl = ref.labelEl;
+    if (!labelEl) continue;
+    // Compute world-space center of the group's children.
+    const box = new THREE.Box3();
+    ref.group.children.forEach((c) => box.expandByObject(c));
+    if (box.isEmpty()) continue;
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    center.y += box.max.y - box.min.y; // lift label above the part
+    center.y += 0.45;
+    const p = projectToScreen(center);
+    labelEl.style.left = `${p.x - assemblyCanvas.getBoundingClientRect().left}px`;
+    labelEl.style.top = `${p.y - assemblyCanvas.getBoundingClientRect().top}px`;
+  }
+}
+
+function renderSbom() {
+  sbomBuild.textContent = AIM9M_SBOM.buildId;
+  sbomNcage.textContent = `NCAGE ${AIM9M_SBOM.ncage}`;
+  sbomItar.textContent = AIM9M_SBOM.exportControl;
+
+  sbomList.innerHTML = "";
+  AIM9M_SBOM.sections.forEach((sec, idx) => {
+    const sectionEl = document.createElement("section");
+    sectionEl.className = "sbom-section";
+    sectionEl.style.transitionDelay = `${idx * 80}ms`;
+
+    const head = document.createElement("div");
+    head.className = "sbom-section-head";
+    const dot = document.createElement("span");
+    dot.className = "sbom-section-dot";
+    dot.style.color = sec.color;
+    dot.style.background = sec.color;
+    const name = document.createElement("span");
+    name.className = "sbom-section-name";
+    name.textContent = sec.label;
+    head.appendChild(dot);
+    head.appendChild(name);
+    sectionEl.appendChild(head);
+
+    const desc = document.createElement("div");
+    desc.className = "sbom-section-desc";
+    desc.textContent = sec.desc;
+    sectionEl.appendChild(desc);
+
+    sec.components.forEach((c) => {
+      const row = document.createElement("div");
+      row.className = "sbom-comp";
+      const left = document.createElement("div");
+      const right = document.createElement("div");
+      const top = document.createElement("div");
+      top.className = "name";
+      top.textContent = c.name;
+      const bottom = document.createElement("div");
+      bottom.className = "vendor";
+      bottom.textContent = `${c.vendor} · ${c.license}`;
+      left.appendChild(top);
+      left.appendChild(bottom);
+      const ver = document.createElement("div");
+      ver.className = "ver";
+      ver.textContent = `v${c.version}`;
+      const hash = document.createElement("div");
+      hash.className = "hash";
+      hash.textContent = c.hash;
+      right.appendChild(ver);
+      right.appendChild(hash);
+      row.appendChild(left);
+      row.appendChild(right);
+      sectionEl.appendChild(row);
+    });
+
+    sbomList.appendChild(sectionEl);
+    requestAnimationFrame(() => sectionEl.classList.add("in"));
+  });
+}
+
+function createLabels() {
+  assemblyLabels.innerHTML = "";
+  for (const ref of asmSectionGroups) {
+    const el = document.createElement("div");
+    el.className = "asm-label";
+    el.textContent = ref.label;
+    el.style.borderColor = ref.color;
+    el.style.boxShadow = `0 0 12px ${ref.color}55`;
+    assemblyLabels.appendChild(el);
+    ref.labelEl = el;
+  }
+}
+
+function showLabels() {
+  asmSectionGroups.forEach((r, i) => {
+    setTimeout(() => r.labelEl?.classList.add("visible"), i * 90);
+  });
+}
+
+function hideLabels() {
+  for (const r of asmSectionGroups) r.labelEl?.classList.remove("visible");
+}
+
+function runAssemblyLoop() {
+  cancelAnimationFrame(asmRaf);
+  const explodeDur = 1400; // ms
+  const sbomDelay = explodeDur + 200;
+  let sbomShown = false;
+  let labelsShown = false;
+
+  const loop = () => {
+    const now = performance.now();
+    const elapsed = now - asmStartTime;
+    if (!asmExploded) {
+      const p = Math.min(1, elapsed / explodeDur);
+      // ease-out quint
+      const e = 1 - Math.pow(1 - p, 5);
+      explodeAssembly(e);
+      assemblyStage.textContent = e < 1
+        ? `Separating ${asmSectionGroups.length} sections… ${Math.round(e * 100)}%`
+        : "Assembly resolved · pulling Software Bill of Materials";
+      if (p >= 1) asmExploded = true;
+    }
+
+    // Slow rotation of the entire assembly stack.
+    const rot = Math.min(1, elapsed / 4000) * 0.6 + (elapsed / 1000) * 0.05;
+    for (const r of asmSectionGroups) r.group.rotation.y = rot;
+
+    updateAssemblyLabels();
+    if (!labelsShown && elapsed > 250) {
+      showLabels();
+      labelsShown = true;
+    }
+    if (!sbomShown && elapsed > sbomDelay) {
+      renderSbom();
+      sbomPanel.classList.add("visible");
+      sbomShown = true;
+    }
+
+    asmRenderer.render(asmScene, asmCamera);
+    asmRaf = requestAnimationFrame(loop);
+  };
+  asmRaf = requestAnimationFrame(loop);
+}
+
+function openAssembly() {
+  initAssemblyScene();
+  assemblyModal.classList.remove("hidden");
+  assemblyModal.setAttribute("aria-hidden", "false");
+  sbomPanel.classList.remove("visible");
+  // Wait for layout so the canvas knows its size.
+  requestAnimationFrame(() => {
+    resizeAssembly();
+    buildAssemblyModel();
+    createLabels();
+    hideLabels();
+    asmExploded = false;
+    asmStartTime = performance.now();
+    runAssemblyLoop();
+  });
+}
+
+function closeAssembly() {
+  assemblyModal.classList.add("hidden");
+  assemblyModal.setAttribute("aria-hidden", "true");
+  sbomPanel.classList.remove("visible");
+  cancelAnimationFrame(asmRaf);
+  asmRaf = 0;
+}
+
+assemblyCloseBtn.addEventListener("click", closeAssembly);
+
+// Right-click on the AIM-9M opens the assembly viewer.
+canvas.addEventListener("contextmenu", (e) => {
+  // Use current hover; we keep pointer position fresh per frame.
+  if (hoveredWeapon && hoveredWeapon.key === "AIM-9 Sidewinder") {
+    e.preventDefault();
+    openAssembly();
+  }
+});
+
+// Tiny escape hatch so the headless tests (and the curious user) can pop the
+// assembly viewer without having to navigate the 3D ring.
+window.__hangar = Object.freeze({ openAssembly, closeAssembly });
 
 function pickWeapon() {
   raycaster.setFromCamera(pointer, camera);
@@ -889,6 +1354,13 @@ function tick() {
     aircraftGroup.rotation.y = Math.sin(t * 0.05) * 0.008;
   }
 
+  // Pulse the AIM-9M glow.
+  if (aim9mGlowMaterials.length) {
+    const t = performance.now() * 0.001;
+    const v = 0.45 + Math.sin(t * 2.4) * 0.25;
+    for (const m of aim9mGlowMaterials) m.emissiveIntensity = v;
+  }
+
   // Slow individual drift for each cloud sprite.
   for (const cloud of cloudsGroup.children) {
     cloud.position.x += Math.cos(cloud.userData.driftAngle) * cloud.userData.driftSpeed * dt;
@@ -920,6 +1392,7 @@ async function boot() {
   onResize();
   try {
     await Promise.all([loadAircraft(), loadWeapons()]);
+    await loadAim9mDetailed(); // depends on the AIM-9 slot existing
   } catch (err) {
     console.error("Failed to load hangar assets:", err);
     loaderText.textContent = "Failed to load assets — check console";

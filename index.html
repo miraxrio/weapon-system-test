@@ -106,6 +106,35 @@
         <div id="map" class="map-canvas"></div>
       </div>
     </div>
+
+    <div id="assembly-modal" class="assembly-modal hidden" aria-hidden="true">
+      <header class="assembly-head">
+        <div>
+          <div class="assembly-title">AIM-9M SIDEWINDER</div>
+          <div class="assembly-sub" id="assembly-stage">— Initialising assembly viewer —</div>
+        </div>
+        <button class="panel-close" id="assembly-close" aria-label="Close assembly viewer">&times;</button>
+      </header>
+
+      <div class="assembly-stage-wrap">
+        <canvas id="assembly-canvas" class="assembly-canvas"></canvas>
+        <div id="assembly-labels" class="assembly-labels"></div>
+      </div>
+
+      <aside id="sbom-panel" class="sbom-panel">
+        <div class="sbom-head">
+          <div class="sbom-title">Software Bill of Materials</div>
+          <div class="sbom-meta">
+            <span id="sbom-build">—</span>
+            <span class="sep">/</span>
+            <span id="sbom-ncage">—</span>
+            <span class="sep">/</span>
+            <span id="sbom-itar" class="sbom-itar">—</span>
+          </div>
+        </div>
+        <div id="sbom-list" class="sbom-list"></div>
+      </aside>
+    </div>
   </div>
 
   <script type="module" src="main.js"></script>
