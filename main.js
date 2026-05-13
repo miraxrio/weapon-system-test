@@ -44,14 +44,82 @@ sky.scale.setScalar(1200);
 scene.add(sky);
 
 const skyUniforms = sky.material.uniforms;
-skyUniforms.turbidity.value = 8;
-skyUniforms.rayleigh.value = 2.2;
-skyUniforms.mieCoefficient.value = 0.004;
-skyUniforms.mieDirectionalG.value = 0.85;
+skyUniforms.turbidity.value = 3.5;
+skyUniforms.rayleigh.value = 3.8;
+skyUniforms.mieCoefficient.value = 0.003;
+skyUniforms.mieDirectionalG.value = 0.8;
 
-const sunSpherical = new THREE.Spherical(1, THREE.MathUtils.degToRad(72), THREE.MathUtils.degToRad(40));
+const sunSpherical = new THREE.Spherical(1, THREE.MathUtils.degToRad(58), THREE.MathUtils.degToRad(40));
 const sunVec = new THREE.Vector3().setFromSpherical(sunSpherical);
 skyUniforms.sunPosition.value.copy(sunVec);
+
+// Distinct fluffy clouds as camera-facing sprites scattered overhead.
+function makeCloudPuffTexture() {
+  const size = 512;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d");
+  g.clearRect(0, 0, size, size);
+
+  // Build one fat cloud out of overlapping radial puffs.
+  const cx = size / 2;
+  const cy = size / 2;
+  const puffs = [
+    [cx, cy, size * 0.32, 0.95],
+    [cx - 90, cy + 30, size * 0.25, 0.85],
+    [cx + 100, cy + 20, size * 0.27, 0.85],
+    [cx - 40, cy - 40, size * 0.22, 0.7],
+    [cx + 60, cy - 50, size * 0.24, 0.75],
+    [cx - 150, cy + 50, size * 0.18, 0.6],
+    [cx + 160, cy + 60, size * 0.18, 0.6],
+  ];
+  for (const [x, y, r, a] of puffs) {
+    const grad = g.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0.0, `rgba(255,255,255,${a})`);
+    grad.addColorStop(0.55, `rgba(245,250,255,${a * 0.4})`);
+    grad.addColorStop(1.0, "rgba(220,230,245,0)");
+    g.fillStyle = grad;
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+const cloudTex = makeCloudPuffTexture();
+const cloudMat = new THREE.SpriteMaterial({
+  map: cloudTex,
+  transparent: true,
+  opacity: 0.9,
+  depthWrite: false,
+  fog: false,
+});
+
+const cloudsGroup = new THREE.Group();
+const cloudCount = 36;
+for (let i = 0; i < cloudCount; i++) {
+  // Each sprite gets its own material clone so per-sprite rotation works.
+  const sprite = new THREE.Sprite(cloudMat.clone());
+  const angle = Math.random() * Math.PI * 2;
+  const radius = 70 + Math.random() * 220;
+  const altitude = 18 + Math.random() * 55;
+  sprite.position.set(
+    Math.cos(angle) * radius,
+    altitude,
+    Math.sin(angle) * radius
+  );
+  const s = 60 + Math.random() * 90;
+  sprite.scale.set(s, s * 0.5, 1);
+  sprite.material.rotation = (Math.random() - 0.5) * 0.6;
+  sprite.userData.driftSpeed = 0.6 + Math.random() * 0.5;
+  sprite.userData.driftAngle = Math.random() * Math.PI * 2;
+  cloudsGroup.add(sprite);
+}
+scene.add(cloudsGroup);
 
 const pmrem = new THREE.PMREMGenerator(renderer);
 const envRT = pmrem.fromScene(sky, 0.04);
@@ -378,7 +446,7 @@ function loadAircraft() {
         if (clip) {
           aircraftMixer = new THREE.AnimationMixer(root);
           aircraftAction = aircraftMixer.clipAction(clip);
-          aircraftAction.setLoop(THREE.LoopRepeat, Infinity);
+          aircraftAction.setLoop(THREE.LoopPingPong, Infinity);
           aircraftAction.clampWhenFinished = false;
           aircraftAction.play();
         }
@@ -622,11 +690,22 @@ function tick() {
 
   if (aircraftMixer) aircraftMixer.update(dt);
 
-  // Visible up/down loop — gentle hover that complements the rig animation.
+  // Subtle hover close to the ground — complements the rig's ping-pong cycle.
   if (aircraftGroup.children.length) {
     const t = performance.now() * 0.001;
-    aircraftGroup.position.y = Math.sin(t * 1.2) * 0.55 + 0.55;
+    aircraftGroup.position.y = Math.sin(t * 1.2) * 0.12 + 0.12;
     aircraftGroup.rotation.y = Math.sin(t * 0.05) * 0.01;
+  }
+
+  // Slow individual drift for each cloud sprite.
+  for (const cloud of cloudsGroup.children) {
+    cloud.position.x += Math.cos(cloud.userData.driftAngle) * cloud.userData.driftSpeed * dt;
+    cloud.position.z += Math.sin(cloud.userData.driftAngle) * cloud.userData.driftSpeed * dt;
+    // Wrap around if the cloud drifts too far.
+    const r = Math.hypot(cloud.position.x, cloud.position.z);
+    if (r > 360) {
+      cloud.userData.driftAngle += Math.PI;
+    }
   }
 
   renderer.render(scene, camera);
