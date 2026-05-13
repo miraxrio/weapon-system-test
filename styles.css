@@ -519,7 +519,7 @@ html, body {
   content: "";
   position: absolute;
   width: 1px;
-  height: 32px;
+  height: var(--leader-h, 32px);
   left: 50%;
   transform: translateX(-50%);
 }
@@ -536,8 +536,8 @@ html, body {
   transform: translateX(-50%);
   box-shadow: 0 0 8px var(--leader);
 }
-.asm-label.below::after { top: calc(100% + 30px); }
-.asm-label.above::after { bottom: calc(100% + 30px); }
+.asm-label.below::after { top: calc(100% + var(--leader-h, 30px) - 2px); }
+.asm-label.above::after { bottom: calc(100% + var(--leader-h, 30px) - 2px); }
 
 .sbom-panel {
   grid-area: sbom;

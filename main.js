@@ -651,13 +651,18 @@ function loadAim9mDetailed() {
           replacement.position.y += 0.7;
         }
 
-        // Apply the pulsing accent emissive — collect materials so the tick
-        // loop can pulse them in sync.
+        // Clone materials before tinting so we don't mutate the source — the
+        // assembly viewer clones the same source and expects unmodified mats.
         aim9mGlowMaterials.length = 0;
         replacement.traverse((obj) => {
-          if (!obj.isMesh) return;
+          if (!obj.isMesh || !obj.material) return;
           obj.castShadow = true;
           obj.receiveShadow = true;
+          if (Array.isArray(obj.material)) {
+            obj.material = obj.material.map((m) => m.clone?.() ?? m);
+          } else {
+            obj.material = obj.material.clone?.() ?? obj.material;
+          }
           const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
           mats.forEach((m) => {
             if (!m || !("emissive" in m)) return;
@@ -986,12 +991,10 @@ function initAssemblyScene() {
     MIDDLE: THREE.MOUSE.DOLLY,
     RIGHT: THREE.MOUSE.PAN,
   };
-  asmControls.autoRotate = true;
-  asmControls.autoRotateSpeed = 0.6;
-  // Any user interaction stops the auto-rotate so it doesn't fight the user.
-  ["pointerdown", "wheel"].forEach((ev) =>
-    assemblyCanvas.addEventListener(ev, () => { if (asmControls) asmControls.autoRotate = false; })
-  );
+  // Restrict azimuth so the user can't accidentally orbit directly along the
+  // missile's long axis (every label would collapse onto the same screen X).
+  asmControls.minAzimuthAngle = -Math.PI / 2.6;
+  asmControls.maxAzimuthAngle = Math.PI / 2.6;
 
   resizeAssembly();
 }
@@ -1034,6 +1037,10 @@ function buildAssemblyModel() {
   const size = new THREE.Vector3(); b.getSize(size);
   if (size.z > size.x && size.z >= size.y) model.rotation.y += Math.PI / 2;
   else if (size.y > size.x && size.y > size.z) model.rotation.z += Math.PI / 2;
+  // AIM-9M GLB places the nose at +X after the auto-rotation; flip 180° so
+  // nose ends up at -X (screen left) and the nose-to-tail label order reads
+  // left-to-right naturally.
+  model.rotation.y += Math.PI;
 
   b = new THREE.Box3().setFromObject(model);
   const sz = new THREE.Vector3(); b.getSize(sz);
@@ -1046,8 +1053,6 @@ function buildAssemblyModel() {
   const cc = new THREE.Vector3(); b.getCenter(cc);
   model.position.sub(cc);
 
-  // Apply a subtle base material treatment + give each mesh a clone so we
-  // can recolour by section without affecting the ring instance.
   model.traverse((obj) => {
     if (!obj.isMesh || !obj.material) return;
     if (Array.isArray(obj.material)) {
@@ -1063,97 +1068,37 @@ function buildAssemblyModel() {
   asmScene.add(model);
   asmModel = model;
 
-  // Group meshes into SBOM sections by sorting all meshes along the missile's
-  // long axis, then partitioning them by COUNT into buckets sized to the
-  // SBOM weights. Bucketing by count avoids the trap where one short physical
-  // section (a sparse rocket motor tube) ends up with all meshes while another
-  // (a mesh-dense seeker) gets zero.
+  // Detect the body radius and the model's full X span — used for label anchor
+  // computation. We deliberately do NOT explode the geometry into "sections"
+  // because the underlying model is a single continuous fuselage; splitting
+  // it by mesh-count produces buckets that don't match what each label means.
+  const finalBox = new THREE.Box3().setFromObject(model);
+  const finalSize = new THREE.Vector3(); finalBox.getSize(finalSize);
+  const radius = Math.max(finalSize.y, finalSize.z) * 0.5;
+  const xMin = finalBox.min.x;
+  const xMax = finalBox.max.x;
+  const xLen = xMax - xMin;
+
+  // Anchor each SBOM section at a realistic fractional position along the
+  // missile's length (nose 0 → tail 1). These are real AIM-9 proportions,
+  // measured from public diagrams.
   const sections = AIM9M_SBOM.sections;
-  // Roughly the real-world AIM-9M section length proportions, nose→tail.
-  const weights = [0.10, 0.12, 0.17, 0.36, 0.14, 0.11];
-  while (weights.length < sections.length) weights.push(1 / sections.length);
-
-  // Collect every leaf mesh + its world X.
-  const tmp = new THREE.Vector3();
-  const meshList = [];
-  model.traverse((obj) => {
-    if (!obj.isMesh) return;
-    obj.getWorldPosition(tmp);
-    meshList.push({ mesh: obj, x: tmp.x });
-  });
-  meshList.sort((a, b) => a.x - b.x);
-  const total = meshList.length;
-
-  // Compute bucket boundary indices.
-  const boundaries = [0];
-  let cum = 0;
+  const anchors = [0.06, 0.20, 0.36, 0.55, 0.76, 0.92];
   for (let i = 0; i < sections.length; i++) {
-    cum += weights[i];
-    boundaries.push(Math.round(cum * total));
-  }
-  // Guarantee at least one mesh per bucket where possible.
-  for (let i = 1; i < boundaries.length; i++) {
-    if (boundaries[i] <= boundaries[i - 1]) boundaries[i] = Math.min(total, boundaries[i - 1] + 1);
-  }
-
-  // Build section groups + assign meshes.
-  for (let i = 0; i < sections.length; i++) {
-    const grp = new THREE.Group();
-    grp.userData.sectionId = sections[i].id;
-    grp.userData.color = sections[i].color;
-    grp.userData.label = sections[i].label;
-    asmScene.add(grp);
+    const anchorX = xMin + (anchors[i] ?? (i + 0.5) / sections.length) * xLen;
     asmSectionGroups.push({
-      group: grp,
+      anchor: new THREE.Vector3(anchorX, 0, 0),
+      radius,
       sectionIndex: i,
       color: sections[i].color,
       label: sections[i].label,
-      originX: 0,
-      meshCount: 0,
     });
   }
-
-  for (let i = 0; i < sections.length; i++) {
-    const grp = asmSectionGroups[i].group;
-    const lo = boundaries[i];
-    const hi = boundaries[i + 1];
-    let sx = 0, count = 0;
-    for (let j = lo; j < hi; j++) {
-      const m = meshList[j].mesh;
-      m.getWorldPosition(tmp);
-      sx += tmp.x; count++;
-      grp.attach(m); // preserves world transform
-    }
-    asmSectionGroups[i].meshCount = count;
-    asmSectionGroups[i].originX = grp.position.x; // 0
-
-    // Tint emissive so each section reads visually even in the assembled view.
-    const color = new THREE.Color(asmSectionGroups[i].color);
-    grp.traverse((m) => {
-      if (!m.isMesh || !m.material) return;
-      const ms = Array.isArray(m.material) ? m.material : [m.material];
-      ms.forEach((mat) => {
-        if (!("emissive" in mat)) return;
-        mat.emissive = color.clone();
-        mat.emissiveIntensity = 0.2;
-      });
-    });
-  }
-
-  // Remove the now-empty wrapper so it isn't traversed during rendering.
-  asmScene.remove(model);
 }
 
-function explodeAssembly(progress) {
-  // progress: 0 (assembled) → 1 (fully exploded)
-  const sep = 1.4; // gap between adjacent sections at full explode
-  const center = (asmSectionGroups.length - 1) / 2;
-  for (let i = 0; i < asmSectionGroups.length; i++) {
-    const ref = asmSectionGroups[i];
-    const offset = (i - center) * sep * progress;
-    ref.group.position.x = ref.originX + offset;
-  }
-}
+// The new viewer keeps the missile intact; "explode progress" is used only
+// to time the staggered label reveal in runAssemblyLoop. No geometry moves.
+function explodeAssembly(_progress) {}
 
 function projectToScreen(worldPoint) {
   const v = worldPoint.clone().project(asmCamera);
@@ -1165,26 +1110,28 @@ function projectToScreen(worldPoint) {
 }
 
 function updateAssemblyLabels() {
-  if (!asmSectionGroups.length) return;
+  if (!asmSectionGroups.length || !asmModel) return;
   const canvasRect = assemblyCanvas.getBoundingClientRect();
+  // Express the label offset in world units that scale with the model so the
+  // labels follow the missile when the user zooms or rotates the camera.
   for (let i = 0; i < asmSectionGroups.length; i++) {
     const ref = asmSectionGroups[i];
     const labelEl = ref.labelEl;
     if (!labelEl) continue;
-    if (ref.meshCount === 0) {
-      labelEl.classList.remove("visible");
-      labelEl.style.display = "none";
-      continue;
-    }
-    labelEl.style.display = "";
-    const target = new THREE.Vector3();
-    ref.group.getWorldPosition(target);
-    // Above placement: label sits up; Below: label sits down. The leader line
-    // (rendered via CSS pseudo) bridges the screen-space gap to the part.
-    target.y += ref.placement === "above" ? 1.05 : -1.05;
-    const p = projectToScreen(target);
-    labelEl.style.left = `${p.x - canvasRect.left}px`;
-    labelEl.style.top = `${p.y - canvasRect.top}px`;
+    // The label sits above/below the body, vertically lifted by enough to
+    // clear the fins. Anchor is already stored in world coordinates.
+    const lift = ref.radius * 2.4 + 0.4;
+    const anchor = ref.anchor.clone();
+    const labelPos = anchor.clone();
+    labelPos.y += ref.placement === "above" ? lift : -lift;
+    const pLabel = projectToScreen(labelPos);
+    const pAnchor = projectToScreen(anchor);
+    labelEl.style.left = `${pLabel.x - canvasRect.left}px`;
+    labelEl.style.top = `${pLabel.y - canvasRect.top}px`;
+    // Drive the leader line length from the actual screen distance to the
+    // anchor so it always reaches the body.
+    const dy = Math.abs(pAnchor.y - pLabel.y);
+    labelEl.style.setProperty("--leader-h", `${Math.max(12, dy - 22)}px`);
   }
 }
 
@@ -1275,31 +1222,37 @@ function hideLabels() {
 
 function runAssemblyLoop() {
   cancelAnimationFrame(asmRaf);
-  const explodeDur = 1400; // ms
-  const sbomDelay = explodeDur + 200;
+  // Sequence: scan the missile (labels appear in order), then drop the SBOM.
+  const labelStep = 220;   // ms between successive label reveals
+  const totalLabels = asmSectionGroups.length;
+  const labelDoneAt = labelStep * (totalLabels + 1);
+  const sbomDelay = labelDoneAt + 200;
   let sbomShown = false;
-  let labelsShown = false;
+  const revealed = new Array(totalLabels).fill(false);
 
   const loop = () => {
     const now = performance.now();
     const elapsed = now - asmStartTime;
-    if (!asmExploded) {
-      const p = Math.min(1, elapsed / explodeDur);
-      // ease-out quint
-      const e = 1 - Math.pow(1 - p, 5);
-      explodeAssembly(e);
-      assemblyStage.textContent = e < 1
-        ? `Separating ${asmSectionGroups.length} sections… ${Math.round(e * 100)}%`
-        : "Assembly resolved · LMB orbit · Wheel zoom · RMB pan";
-      if (p >= 1) asmExploded = true;
+
+    // Reveal labels one-by-one along the body, nose to tail.
+    for (let i = 0; i < totalLabels; i++) {
+      if (revealed[i]) continue;
+      if (elapsed >= labelStep * (i + 1)) {
+        asmSectionGroups[i].labelEl?.classList.add("visible");
+        revealed[i] = true;
+      }
+    }
+
+    if (elapsed < labelDoneAt) {
+      const idx = Math.min(totalLabels, Math.floor(elapsed / labelStep) + 1);
+      assemblyStage.textContent = `Scanning components… ${idx} / ${totalLabels}`;
+    } else if (!asmExploded) {
+      asmExploded = true;
+      assemblyStage.textContent = "Assembly resolved · LMB orbit · Wheel zoom · RMB pan";
     }
 
     if (asmControls) asmControls.update();
     updateAssemblyLabels();
-    if (!labelsShown && elapsed > 250) {
-      showLabels();
-      labelsShown = true;
-    }
     if (!sbomShown && elapsed > sbomDelay) {
       renderSbom();
       sbomPanel.classList.add("visible");
@@ -1326,7 +1279,6 @@ function openAssembly() {
     if (asmControls) {
       asmCamera.position.set(0.3, 0.4, 15);
       asmControls.target.set(0, 0, 0);
-      asmControls.autoRotate = true;
       asmControls.update();
     }
     asmExploded = false;
@@ -1341,7 +1293,6 @@ function closeAssembly() {
   sbomPanel.classList.remove("visible");
   cancelAnimationFrame(asmRaf);
   asmRaf = 0;
-  if (asmControls) asmControls.autoRotate = false;
 }
 
 assemblyCloseBtn.addEventListener("click", closeAssembly);
