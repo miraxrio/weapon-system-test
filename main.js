@@ -156,11 +156,14 @@ scene.environment = envRT.texture;
 // ---------------------------------------------------------------------------
 // Lights
 // ---------------------------------------------------------------------------
-const hemi = new THREE.HemisphereLight(0xb8d6ff, 0x5a4d2e, 0.9);
+const hemi = new THREE.HemisphereLight(0xcfe2ff, 0x6e6043, 1.35);
 scene.add(hemi);
 
-// Sunlight aligned with the sky's sun direction.
-const sun = new THREE.DirectionalLight(0xfff4d6, 1.0);
+const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+scene.add(ambient);
+
+// Sunlight aligned with the sky's sun direction — gentle, not hot.
+const sun = new THREE.DirectionalLight(0xfff4d6, 1.25);
 sun.position.copy(sunVec).multiplyScalar(30);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
@@ -171,14 +174,15 @@ sun.shadow.camera.right = 24;
 sun.shadow.camera.top = 24;
 sun.shadow.camera.bottom = -24;
 sun.shadow.bias = -0.0005;
-sun.shadow.radius = 4;
+sun.shadow.radius = 10;
+if ("intensity" in sun.shadow) sun.shadow.intensity = 0.55; // softer cast shadow
 scene.add(sun);
 
-const rim = new THREE.DirectionalLight(0x88aaff, 0.25);
+const rim = new THREE.DirectionalLight(0x88aaff, 0.2);
 rim.position.set(-12, 8, -14);
 scene.add(rim);
 
-const bounce = new THREE.DirectionalLight(0xffc080, 0.2);
+const bounce = new THREE.DirectionalLight(0xffc080, 0.18);
 bounce.position.set(-10, 2, 12);
 scene.add(bounce);
 
@@ -467,7 +471,6 @@ function loadAircraft() {
         frameObject(root, 11.5); // target wingspan ~11.5 units
         enableShadows(root);
 
-        // Play the bundled "F-15|ArmatureAction" clip on a loop.
         const clip =
           THREE.AnimationClip.findByName(gltf.animations, "F-15|ArmatureAction") ??
           gltf.animations[0];
@@ -478,6 +481,13 @@ function loadAircraft() {
           aircraftAction.clampWhenFinished = false;
           aircraftAction.timeScale = 0.45;
           aircraftAction.play();
+
+          // The clip animates the landing gear / control surfaces. Box3 on a
+          // SkinnedMesh only sees the bind-pose bounding box, so we can't
+          // re-ground programmatically across the animation. Apply an empirical
+          // offset that drops the fuselage close to the tarmac when the gear
+          // is retracted (the gear simply tucks past the floor when extended).
+          root.position.y -= 3.6;
         }
 
         resolve(root);
@@ -719,10 +729,10 @@ function tick() {
 
   if (aircraftMixer) aircraftMixer.update(dt);
 
-  // Tiniest hover so the rig animation reads but the aircraft never lifts.
+  // Restore visible hover bob on top of the rig animation.
   if (aircraftGroup.children.length) {
     const t = performance.now() * 0.001;
-    aircraftGroup.position.y = Math.sin(t * 0.9) * 0.012 + 0.012;
+    aircraftGroup.position.y = Math.sin(t * 0.8) * 0.18 + 0.18;
     aircraftGroup.rotation.y = Math.sin(t * 0.05) * 0.008;
   }
 
