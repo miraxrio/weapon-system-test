@@ -1,7 +1,9 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import * as L from "./vendor/leaflet/leaflet.esm.js";
 import { WEAPON_DATA, WEAPON_ORDER } from "./weapons.js";
+import { ARMORY } from "./armory.js";
 
 const canvas = document.getElementById("scene");
 const tooltipEl = document.getElementById("tooltip");
@@ -156,14 +158,14 @@ scene.environment = envRT.texture;
 // ---------------------------------------------------------------------------
 // Lights
 // ---------------------------------------------------------------------------
-const hemi = new THREE.HemisphereLight(0xcfe2ff, 0x6e6043, 1.35);
+const hemi = new THREE.HemisphereLight(0xdaedff, 0x7e6f50, 1.55);
 scene.add(hemi);
 
-const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+const ambient = new THREE.AmbientLight(0xffffff, 0.45);
 scene.add(ambient);
 
 // Sunlight aligned with the sky's sun direction — gentle, not hot.
-const sun = new THREE.DirectionalLight(0xfff4d6, 1.25);
+const sun = new THREE.DirectionalLight(0xfff4d6, 1.5);
 sun.position.copy(sunVec).multiplyScalar(30);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
@@ -694,6 +696,157 @@ canvas.addEventListener("pointerleave", () => {
     hoveredWeapon = null;
     hideTooltip();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Click-to-open side panel
+// ---------------------------------------------------------------------------
+const panelEl = document.getElementById("panel");
+const panelName = document.getElementById("p-name");
+const panelClass = document.getElementById("p-class");
+const iStorage = document.getElementById("i-storage");
+const iReady = document.getElementById("i-ready");
+const iMaint = document.getElementById("i-maint");
+const iNeeds = document.getElementById("i-needs");
+const logEl = document.getElementById("p-log");
+const panelCloseBtn = document.getElementById("p-close");
+
+const mapModal = document.getElementById("map-modal");
+const mapTitle = document.getElementById("m-title");
+const mapSub = document.getElementById("m-sub");
+const mapCloseBtn = document.getElementById("m-close");
+
+function fmtCoord(lat, lng) {
+  const ns = lat >= 0 ? "N" : "S";
+  const ew = lng >= 0 ? "E" : "W";
+  return `${Math.abs(lat).toFixed(3)}° ${ns}, ${Math.abs(lng).toFixed(3)}° ${ew}`;
+}
+
+function openPanel(weaponKey) {
+  const info = WEAPON_DATA[weaponKey];
+  const armory = ARMORY[weaponKey];
+  if (!info || !armory) return;
+
+  panelName.textContent = info.name;
+  panelClass.textContent = info.class;
+  iStorage.textContent = armory.inventory.storage;
+  iReady.textContent = armory.inventory.ready;
+  iMaint.textContent = armory.inventory.maintenance;
+  iNeeds.textContent = armory.inventory.needs;
+
+  logEl.innerHTML = "";
+  for (const use of armory.uses) {
+    const entry = document.createElement("div");
+    entry.className = "log-entry";
+
+    const row = document.createElement("div");
+    row.className = "log-row";
+    const pilot = document.createElement("div");
+    pilot.className = "log-pilot";
+    pilot.textContent = use.pilot;
+    const date = document.createElement("div");
+    date.className = "log-date";
+    date.textContent = use.date;
+    row.appendChild(pilot);
+    row.appendChild(date);
+    entry.appendChild(row);
+
+    const target = document.createElement("div");
+    target.className = "log-target";
+    target.textContent = use.target;
+    entry.appendChild(target);
+
+    const coord = document.createElement("button");
+    coord.className = "log-coord";
+    coord.type = "button";
+    coord.textContent = fmtCoord(use.lat, use.lng);
+    coord.addEventListener("click", () => openMap(info.name, use));
+    entry.appendChild(coord);
+
+    logEl.appendChild(entry);
+  }
+
+  panelEl.classList.remove("closed");
+  panelEl.setAttribute("aria-hidden", "false");
+}
+
+function closePanel() {
+  panelEl.classList.add("closed");
+  panelEl.setAttribute("aria-hidden", "true");
+}
+
+panelCloseBtn.addEventListener("click", closePanel);
+
+// Distinguish click from drag so orbiting the camera doesn't trigger picks.
+let downAt = null;
+canvas.addEventListener("pointerdown", (e) => {
+  downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
+});
+canvas.addEventListener("pointerup", (e) => {
+  if (!downAt) return;
+  const dx = e.clientX - downAt.x;
+  const dy = e.clientY - downAt.y;
+  downAt = null;
+  if (Math.hypot(dx, dy) > 6) return; // it was a drag (orbit/pan), not a click
+
+  // Use the current raycast hit (computed each frame in tick()).
+  if (hoveredWeapon) {
+    openPanel(hoveredWeapon.key);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Leaflet map modal — opens on coordinate click in the engagement log
+// ---------------------------------------------------------------------------
+let leafletMap = null;
+let leafletMarker = null;
+
+function ensureMap() {
+  if (leafletMap) return leafletMap;
+  leafletMap = L.map("map", {
+    worldCopyJump: true,
+    zoomControl: true,
+    attributionControl: true,
+  }).setView([0, 0], 2);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 18,
+    attribution: "&copy; OpenStreetMap contributors",
+  }).addTo(leafletMap);
+  return leafletMap;
+}
+
+function openMap(weaponName, use) {
+  mapTitle.textContent = `${weaponName} — strike location`;
+  mapSub.textContent = `${use.pilot} · ${use.date} · ${fmtCoord(use.lat, use.lng)}`;
+  mapModal.classList.remove("hidden");
+  mapModal.setAttribute("aria-hidden", "false");
+
+  // Init/refresh after the modal is visible so Leaflet can size correctly.
+  requestAnimationFrame(() => {
+    const map = ensureMap();
+    map.invalidateSize();
+    map.flyTo([use.lat, use.lng], 7, { duration: 0.8 });
+    if (leafletMarker) leafletMarker.remove();
+    leafletMarker = L.marker([use.lat, use.lng])
+      .addTo(map)
+      .bindPopup(`<b>${weaponName}</b><br>${use.target}<br><small>${use.pilot} — ${use.date}</small>`)
+      .openPopup();
+  });
+}
+
+function closeMap() {
+  mapModal.classList.add("hidden");
+  mapModal.setAttribute("aria-hidden", "true");
+}
+
+mapCloseBtn.addEventListener("click", closeMap);
+mapModal.addEventListener("click", (e) => {
+  if (e.target === mapModal) closeMap();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!mapModal.classList.contains("hidden")) closeMap();
+  else if (!panelEl.classList.contains("closed")) closePanel();
 });
 
 function pickWeapon() {

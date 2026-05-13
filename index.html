@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>F-15E Hangar — Weapon Loadout</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
   <script type="importmap">
   {
     "imports": {
@@ -52,6 +53,58 @@
       </div>
       <div class="tooltip-desc" id="t-desc">—</div>
       <div class="tooltip-stats" id="t-stats"></div>
+      <div class="tooltip-hint">Click for full armory report</div>
+    </div>
+
+    <aside id="panel" class="panel closed" aria-hidden="true">
+      <header class="panel-head">
+        <div>
+          <div class="panel-name" id="p-name">—</div>
+          <div class="panel-class" id="p-class">—</div>
+        </div>
+        <button class="panel-close" id="p-close" aria-label="Close">&times;</button>
+      </header>
+      <div class="panel-body">
+        <section class="panel-section">
+          <h3>Inventory</h3>
+          <div class="inv-grid">
+            <div class="inv-card inv-storage">
+              <div class="inv-label">In Storage</div>
+              <div class="inv-value" id="i-storage">—</div>
+            </div>
+            <div class="inv-card inv-ready">
+              <div class="inv-label">Ready to Deploy</div>
+              <div class="inv-value" id="i-ready">—</div>
+            </div>
+            <div class="inv-card inv-maint">
+              <div class="inv-label">Under Maintenance</div>
+              <div class="inv-value" id="i-maint">—</div>
+            </div>
+            <div class="inv-card inv-needs">
+              <div class="inv-label">Needs Maintenance</div>
+              <div class="inv-value" id="i-needs">—</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <h3>Engagement Log</h3>
+          <div class="log" id="p-log"></div>
+        </section>
+      </div>
+    </aside>
+
+    <div id="map-modal" class="map-modal hidden" aria-hidden="true">
+      <div class="map-window">
+        <header class="map-head">
+          <div>
+            <div class="map-title" id="m-title">—</div>
+            <div class="map-sub" id="m-sub">—</div>
+          </div>
+          <button class="panel-close" id="m-close" aria-label="Close map">&times;</button>
+        </header>
+        <div id="map" class="map-canvas"></div>
+      </div>
     </div>
   </div>
 
