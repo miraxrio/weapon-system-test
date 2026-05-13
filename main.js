@@ -967,8 +967,9 @@ function initAssemblyScene() {
   rimA.position.set(-8, 3, -6);
   asmScene.add(rimA);
 
-  asmCamera = new THREE.PerspectiveCamera(35, 1, 0.05, 200);
-  asmCamera.position.set(0, 0.6, 9);
+  asmCamera = new THREE.PerspectiveCamera(28, 1, 0.05, 200);
+  asmCamera.position.set(0.3, 0.4, 15);
+  asmCamera.lookAt(0, 0, 0);
 
   resizeAssembly();
 }
@@ -1015,7 +1016,7 @@ function buildAssemblyModel() {
   b = new THREE.Box3().setFromObject(model);
   const sz = new THREE.Vector3(); b.getSize(sz);
   const longest = Math.max(sz.x, sz.y, sz.z);
-  const targetLen = 6.5;
+  const targetLen = 8.5;
   model.scale.setScalar(targetLen / longest);
 
   // Re-center after scale.
@@ -1040,59 +1041,71 @@ function buildAssemblyModel() {
   asmScene.add(model);
   asmModel = model;
 
-  // Group meshes into SBOM sections by world-X position (along the missile's
-  // long axis after normalisation). The SBOM definition is ordered nose → tail.
+  // Group meshes into SBOM sections by sorting all meshes along the missile's
+  // long axis, then partitioning them by COUNT into buckets sized to the
+  // SBOM weights. Bucketing by count avoids the trap where one short physical
+  // section (a sparse rocket motor tube) ends up with all meshes while another
+  // (a mesh-dense seeker) gets zero.
   const sections = AIM9M_SBOM.sections;
-  const bbox = new THREE.Box3().setFromObject(model);
-  const xMin = bbox.min.x;
-  const xMax = bbox.max.x;
-  const xLen = xMax - xMin;
-
-  // Allocate non-uniform buckets — nose-heavy electronics get smaller slices,
-  // motor + fins get larger ones. Weights sum to 1.
-  const weights = [0.18, 0.16, 0.16, 0.30, 0.12, 0.08]; // seeker..fins
+  // Roughly the real-world AIM-9M section length proportions, nose→tail.
+  const weights = [0.10, 0.12, 0.17, 0.36, 0.14, 0.11];
   while (weights.length < sections.length) weights.push(1 / sections.length);
-  const edges = [xMin];
-  let acc = 0;
+
+  // Collect every leaf mesh + its world X.
+  const tmp = new THREE.Vector3();
+  const meshList = [];
+  model.traverse((obj) => {
+    if (!obj.isMesh) return;
+    obj.getWorldPosition(tmp);
+    meshList.push({ mesh: obj, x: tmp.x });
+  });
+  meshList.sort((a, b) => a.x - b.x);
+  const total = meshList.length;
+
+  // Compute bucket boundary indices.
+  const boundaries = [0];
+  let cum = 0;
   for (let i = 0; i < sections.length; i++) {
-    acc += weights[i];
-    edges.push(xMin + xLen * acc);
+    cum += weights[i];
+    boundaries.push(Math.round(cum * total));
+  }
+  // Guarantee at least one mesh per bucket where possible.
+  for (let i = 1; i < boundaries.length; i++) {
+    if (boundaries[i] <= boundaries[i - 1]) boundaries[i] = Math.min(total, boundaries[i - 1] + 1);
   }
 
+  // Build section groups + assign meshes.
   for (let i = 0; i < sections.length; i++) {
     const grp = new THREE.Group();
     grp.userData.sectionId = sections[i].id;
     grp.userData.color = sections[i].color;
     grp.userData.label = sections[i].label;
     asmScene.add(grp);
-    asmSectionGroups.push({ group: grp, sectionIndex: i, color: sections[i].color, label: sections[i].label, originX: 0, targetX: 0 });
+    asmSectionGroups.push({
+      group: grp,
+      sectionIndex: i,
+      color: sections[i].color,
+      label: sections[i].label,
+      originX: 0,
+      meshCount: 0,
+    });
   }
 
-  // Reassign each leaf mesh to its bucket group (preserve world transform).
-  const buckets = asmSectionGroups.map(() => []);
-  const tmp = new THREE.Vector3();
-  model.traverse((obj) => {
-    if (!obj.isMesh) return;
-    obj.getWorldPosition(tmp);
-    let bucket = sections.length - 1;
-    for (let i = 0; i < sections.length; i++) {
-      if (tmp.x <= edges[i + 1]) { bucket = i; break; }
-    }
-    buckets[bucket].push(obj);
-  });
-
-  for (let i = 0; i < buckets.length; i++) {
+  for (let i = 0; i < sections.length; i++) {
     const grp = asmSectionGroups[i].group;
+    const lo = boundaries[i];
+    const hi = boundaries[i + 1];
     let sx = 0, count = 0;
-    for (const mesh of buckets[i]) {
-      mesh.getWorldPosition(tmp);
+    for (let j = lo; j < hi; j++) {
+      const m = meshList[j].mesh;
+      m.getWorldPosition(tmp);
       sx += tmp.x; count++;
-      grp.attach(mesh); // preserves world transform
+      grp.attach(m); // preserves world transform
     }
-    grp.userData.centerX = count ? sx / count : 0;
-    asmSectionGroups[i].originX = grp.position.x;
+    asmSectionGroups[i].meshCount = count;
+    asmSectionGroups[i].originX = grp.position.x; // 0
 
-    // Recolour each section's emissive so the explode reads visually.
+    // Tint emissive so each section reads visually even in the assembled view.
     const color = new THREE.Color(asmSectionGroups[i].color);
     grp.traverse((m) => {
       if (!m.isMesh || !m.material) return;
@@ -1100,18 +1113,18 @@ function buildAssemblyModel() {
       ms.forEach((mat) => {
         if (!("emissive" in mat)) return;
         mat.emissive = color.clone();
-        mat.emissiveIntensity = 0.25;
+        mat.emissiveIntensity = 0.2;
       });
     });
   }
 
-  // Empty the now-childless root so the model isn't double-rendered.
+  // Remove the now-empty wrapper so it isn't traversed during rendering.
   asmScene.remove(model);
 }
 
 function explodeAssembly(progress) {
   // progress: 0 (assembled) → 1 (fully exploded)
-  const sep = 1.8; // total spacing between adjacent sections at full explode
+  const sep = 1.4; // gap between adjacent sections at full explode
   const center = (asmSectionGroups.length - 1) / 2;
   for (let i = 0; i < asmSectionGroups.length; i++) {
     const ref = asmSectionGroups[i];
@@ -1130,22 +1143,26 @@ function projectToScreen(worldPoint) {
 }
 
 function updateAssemblyLabels() {
-  if (!asmModel && !asmSectionGroups.length) return;
+  if (!asmSectionGroups.length) return;
+  const canvasRect = assemblyCanvas.getBoundingClientRect();
   for (let i = 0; i < asmSectionGroups.length; i++) {
     const ref = asmSectionGroups[i];
     const labelEl = ref.labelEl;
     if (!labelEl) continue;
-    // Compute world-space center of the group's children.
-    const box = new THREE.Box3();
-    ref.group.children.forEach((c) => box.expandByObject(c));
-    if (box.isEmpty()) continue;
-    const center = new THREE.Vector3();
-    box.getCenter(center);
-    center.y += box.max.y - box.min.y; // lift label above the part
-    center.y += 0.45;
-    const p = projectToScreen(center);
-    labelEl.style.left = `${p.x - assemblyCanvas.getBoundingClientRect().left}px`;
-    labelEl.style.top = `${p.y - assemblyCanvas.getBoundingClientRect().top}px`;
+    if (ref.meshCount === 0) {
+      labelEl.classList.remove("visible");
+      labelEl.style.display = "none";
+      continue;
+    }
+    labelEl.style.display = "";
+    const target = new THREE.Vector3();
+    ref.group.getWorldPosition(target);
+    // Above placement: label sits up; Below: label sits down. The leader line
+    // (rendered via CSS pseudo) bridges the screen-space gap to the part.
+    target.y += ref.placement === "above" ? 1.05 : -1.05;
+    const p = projectToScreen(target);
+    labelEl.style.left = `${p.x - canvasRect.left}px`;
+    labelEl.style.top = `${p.y - canvasRect.top}px`;
   }
 }
 
@@ -1211,15 +1228,17 @@ function renderSbom() {
 
 function createLabels() {
   assemblyLabels.innerHTML = "";
-  for (const ref of asmSectionGroups) {
+  asmSectionGroups.forEach((ref, i) => {
     const el = document.createElement("div");
-    el.className = "asm-label";
+    const placement = i % 2 === 0 ? "above" : "below";
+    el.className = `asm-label ${placement}`;
     el.textContent = ref.label;
-    el.style.borderColor = ref.color;
+    el.style.setProperty("--leader", ref.color);
     el.style.boxShadow = `0 0 12px ${ref.color}55`;
     assemblyLabels.appendChild(el);
     ref.labelEl = el;
-  }
+    ref.placement = placement;
+  });
 }
 
 function showLabels() {

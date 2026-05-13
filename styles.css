@@ -499,14 +499,15 @@ html, body {
   pointer-events: none;
 }
 .asm-label {
+  --leader: var(--hud-accent);
   position: absolute;
   transform: translate(-50%, -50%);
   font-size: 10px;
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--hud);
-  background: rgba(8,12,16,0.78);
-  border: 1px solid var(--hud-border);
+  background: rgba(8,12,16,0.82);
+  border: 1px solid var(--leader);
   padding: 4px 8px;
   border-radius: 2px;
   white-space: nowrap;
@@ -517,15 +518,26 @@ html, body {
 .asm-label::before {
   content: "";
   position: absolute;
+  width: 1px;
+  height: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.asm-label.below::before { top: 100%; background: linear-gradient(var(--leader), transparent); }
+.asm-label.above::before { bottom: 100%; background: linear-gradient(transparent, var(--leader)); }
+.asm-label::after {
+  content: "";
+  position: absolute;
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--hud-accent);
-  top: 50%;
-  left: -10px;
-  transform: translateY(-50%);
-  box-shadow: 0 0 6px var(--hud-accent);
+  background: var(--leader);
+  left: 50%;
+  transform: translateX(-50%);
+  box-shadow: 0 0 8px var(--leader);
 }
+.asm-label.below::after { top: calc(100% + 30px); }
+.asm-label.above::after { bottom: calc(100% + 30px); }
 
 .sbom-panel {
   grid-area: sbom;
