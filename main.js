@@ -43,9 +43,9 @@ const skyMat = new THREE.ShaderMaterial({
   side: THREE.BackSide,
   depthWrite: false,
   uniforms: {
-    uTop: { value: new THREE.Color(0x0b2f80) },
-    uMid: { value: new THREE.Color(0x1a66cc) },
-    uHoriz: { value: new THREE.Color(0x6fb0ec) },
+    uTop: { value: new THREE.Color(0x4a93dc) },
+    uMid: { value: new THREE.Color(0x82b6e6) },
+    uHoriz: { value: new THREE.Color(0xc4def0) },
   },
   vertexShader: /* glsl */ `
     varying vec3 vWorldDir;
@@ -156,11 +156,11 @@ scene.environment = envRT.texture;
 // ---------------------------------------------------------------------------
 // Lights
 // ---------------------------------------------------------------------------
-const hemi = new THREE.HemisphereLight(0xa6c8ff, 0x4d3a1f, 0.55);
+const hemi = new THREE.HemisphereLight(0xb8d6ff, 0x5a4d2e, 0.9);
 scene.add(hemi);
 
 // Sunlight aligned with the sky's sun direction.
-const sun = new THREE.DirectionalLight(0xfff4d6, 2.4);
+const sun = new THREE.DirectionalLight(0xfff4d6, 1.0);
 sun.position.copy(sunVec).multiplyScalar(30);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
@@ -171,13 +171,14 @@ sun.shadow.camera.right = 24;
 sun.shadow.camera.top = 24;
 sun.shadow.camera.bottom = -24;
 sun.shadow.bias = -0.0005;
+sun.shadow.radius = 4;
 scene.add(sun);
 
-const rim = new THREE.DirectionalLight(0x88aaff, 0.5);
+const rim = new THREE.DirectionalLight(0x88aaff, 0.25);
 rim.position.set(-12, 8, -14);
 scene.add(rim);
 
-const bounce = new THREE.DirectionalLight(0xffc080, 0.35);
+const bounce = new THREE.DirectionalLight(0xffc080, 0.2);
 bounce.position.set(-10, 2, 12);
 scene.add(bounce);
 
@@ -718,11 +719,11 @@ function tick() {
 
   if (aircraftMixer) aircraftMixer.update(dt);
 
-  // Subtle hover that just kisses the tarmac — complements the rig animation.
+  // Tiniest hover so the rig animation reads but the aircraft never lifts.
   if (aircraftGroup.children.length) {
     const t = performance.now() * 0.001;
-    aircraftGroup.position.y = Math.sin(t * 0.9) * 0.04 + 0.04;
-    aircraftGroup.rotation.y = Math.sin(t * 0.05) * 0.01;
+    aircraftGroup.position.y = Math.sin(t * 0.9) * 0.012 + 0.012;
+    aircraftGroup.rotation.y = Math.sin(t * 0.05) * 0.008;
   }
 
   // Slow individual drift for each cloud sprite.
