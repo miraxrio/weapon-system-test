@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>F-15E Hangar — Weapon Loadout</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.module.js",
+      "three/addons/": "./vendor/addons/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <canvas id="scene"></canvas>
+
+    <header class="hud-top">
+      <div class="hud-title">
+        <div class="hud-mark">F-15E</div>
+        <div class="hud-sub">STRIKE EAGLE &middot; HANGAR LOADOUT</div>
+      </div>
+      <div class="hud-meta">
+        <div><span class="dot"></span>READY</div>
+        <div id="weapon-counter">— / —</div>
+      </div>
+    </header>
+
+    <footer class="hud-bottom">
+      <div class="hud-hint">
+        <kbd>LMB</kbd> drag &mdash; orbit &nbsp;&middot;&nbsp;
+        <kbd>Wheel</kbd> &mdash; zoom &nbsp;&middot;&nbsp;
+        <kbd>RMB</kbd> drag &mdash; pan &nbsp;&middot;&nbsp;
+        Hover a weapon for details
+      </div>
+    </footer>
+
+    <div id="loading" class="loading">
+      <div class="loader">
+        <div class="bar"><div id="loader-fill" class="bar-fill"></div></div>
+        <div id="loader-text" class="loader-text">Loading hangar...</div>
+      </div>
+    </div>
+
+    <div id="tooltip" class="tooltip hidden">
+      <div class="tooltip-header">
+        <div class="tooltip-name" id="t-name">—</div>
+        <div class="tooltip-class" id="t-class">—</div>
+      </div>
+      <div class="tooltip-desc" id="t-desc">—</div>
+      <div class="tooltip-stats" id="t-stats"></div>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

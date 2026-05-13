@@ -1,0 +1,215 @@
+:root {
+  --hud: #c8d4dc;
+  --hud-dim: #6c7a85;
+  --hud-accent: #ffb84a;
+  --hud-warn: #ff6a3d;
+  --hud-bg: rgba(8, 12, 16, 0.62);
+  --hud-bg-strong: rgba(8, 12, 16, 0.86);
+  --hud-border: rgba(255, 184, 74, 0.35);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  background: #05080b;
+  color: var(--hud);
+  font-family: "Roboto Condensed", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+#app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+#scene:active { cursor: grabbing; }
+
+.hud-top, .hud-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 18px 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.hud-top { top: 0; }
+.hud-bottom { bottom: 0; justify-content: center; }
+
+.hud-title { display: flex; flex-direction: column; gap: 2px; }
+.hud-mark {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: var(--hud-accent);
+  text-shadow: 0 0 10px rgba(255, 184, 74, 0.4);
+}
+.hud-sub {
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: var(--hud-dim);
+  text-transform: uppercase;
+}
+
+.hud-meta {
+  display: flex;
+  gap: 18px;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--hud);
+}
+.hud-meta > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 2px;
+  backdrop-filter: blur(6px);
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #45ff8c;
+  box-shadow: 0 0 8px #45ff8c;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.hud-hint {
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--hud-dim);
+  text-transform: uppercase;
+  background: var(--hud-bg);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 8px 16px;
+  border-radius: 2px;
+  backdrop-filter: blur(6px);
+}
+.hud-hint kbd {
+  font-family: inherit;
+  color: var(--hud);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 1px 6px;
+  border-radius: 2px;
+  font-size: 10px;
+}
+
+.tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-width: 260px;
+  max-width: 320px;
+  background: var(--hud-bg-strong);
+  border: 1px solid var(--hud-border);
+  border-radius: 2px;
+  padding: 14px 16px;
+  pointer-events: none;
+  z-index: 20;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,184,74,0.12);
+  transform: translate(16px, 16px);
+  transition: opacity 120ms ease;
+  opacity: 1;
+}
+.tooltip.hidden { opacity: 0; pointer-events: none; }
+
+.tooltip-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,184,74,0.18);
+}
+.tooltip-name {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--hud-accent);
+  text-transform: uppercase;
+}
+.tooltip-class {
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: var(--hud-dim);
+  text-transform: uppercase;
+}
+.tooltip-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--hud);
+  margin-bottom: 10px;
+}
+.tooltip-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.tooltip-stats .k { color: var(--hud-dim); }
+.tooltip-stats .v { color: var(--hud); text-align: right; }
+
+.loading {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, #0a1014 0%, #05080b 80%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  transition: opacity 600ms ease;
+}
+.loading.hidden { opacity: 0; pointer-events: none; }
+
+.loader { width: 320px; display: flex; flex-direction: column; gap: 12px; }
+.bar {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 184, 74, 0.12);
+  border: 1px solid rgba(255, 184, 74, 0.25);
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  background: var(--hud-accent);
+  width: 0%;
+  box-shadow: 0 0 12px var(--hud-accent);
+  transition: width 200ms ease;
+}
+.loader-text {
+  font-size: 11px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--hud-dim);
+  text-align: center;
+}

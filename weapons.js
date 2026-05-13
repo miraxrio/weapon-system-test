@@ -1,0 +1,148 @@
+// Catalog of weapons present in missile_set.glb keyed by the GLB node name prefix.
+// Stats below reflect publicly known, unclassified specifications.
+export const WEAPON_DATA = {
+  "AGM65 Maverick": {
+    name: "AGM-65 Maverick",
+    class: "Air-to-Surface Missile",
+    desc: "American tactical, air-to-ground missile designed for close-air support and interdiction. Effective against small, hardened targets like armor, bunkers, and ships.",
+    stats: {
+      "Origin": "USA",
+      "Guidance": "EO / IIR / Laser",
+      "Range": "~27 km",
+      "Speed": "Mach 0.85",
+      "Warhead": "57 kg shaped / 136 kg blast",
+      "Length": "2.49 m",
+    },
+  },
+  "AGM-154 JSOW": {
+    name: "AGM-154 JSOW",
+    class: "Stand-off Glide Bomb",
+    desc: "Joint Stand-Off Weapon — an unpowered, GPS/INS-guided glide munition launched outside the range of most short-range defenses.",
+    stats: {
+      "Origin": "USA",
+      "Guidance": "GPS / INS (+IIR)",
+      "Range": "~130 km (high alt.)",
+      "Speed": "Subsonic glide",
+      "Warhead": "BLU-111 / Submunitions",
+      "Length": "4.1 m",
+    },
+  },
+  "MBDA Brimstone": {
+    name: "MBDA Brimstone",
+    class: "Air-to-Surface Missile",
+    desc: "British advanced anti-armor missile featuring millimetric-wave radar and laser guidance. Designed for precision strikes against moving vehicles.",
+    stats: {
+      "Origin": "UK",
+      "Guidance": "mmW Radar / SAL",
+      "Range": "~20 km (air)",
+      "Speed": "Mach 1.3",
+      "Warhead": "6.3 kg tandem HEAT",
+      "Length": "1.8 m",
+    },
+  },
+  "GBU-24 Paveway": {
+    name: "GBU-24 Paveway III",
+    class: "Laser-Guided Bomb",
+    desc: "Low-level laser-guided bomb based on the BLU-109 penetrator or Mk 84 warhead. Used for striking hardened or buried targets.",
+    stats: {
+      "Origin": "USA",
+      "Guidance": "Semi-Active Laser",
+      "Range": "~10–15 km",
+      "Speed": "Subsonic glide",
+      "Warhead": "907 kg (Mk 84 / BLU-109)",
+      "Length": "4.32 m",
+    },
+  },
+  "Mk83 bomb": {
+    name: "Mk 83",
+    class: "Unguided General-Purpose Bomb",
+    desc: "454 kg (1,000 lb) low-drag general-purpose bomb. A staple of NATO air forces for unguided strike missions.",
+    stats: {
+      "Origin": "USA",
+      "Guidance": "Unguided / Ballistic",
+      "Range": "Ballistic",
+      "Speed": "Free-fall",
+      "Warhead": "202 kg H6 / Tritonal",
+      "Length": "3.0 m",
+    },
+  },
+  "AIM-54 Phoenix": {
+    name: "AIM-54 Phoenix",
+    class: "Long-Range Air-to-Air Missile",
+    desc: "Long-range, semi-active and active radar-guided missile originally designed for the F-14 to intercept Soviet bombers and cruise missiles.",
+    stats: {
+      "Origin": "USA",
+      "Guidance": "SARH + Active Radar",
+      "Range": "~190 km",
+      "Speed": "Mach 5",
+      "Warhead": "60 kg HE Blast-Frag",
+      "Length": "3.96 m",
+    },
+  },
+  "AIM-9 Sidewinder": {
+    name: "AIM-9 Sidewinder",
+    class: "Short-Range Air-to-Air Missile",
+    desc: "Heat-seeking short-range air-to-air missile. The world's most widely used WVR missile, in service since 1956 across many variants.",
+    stats: {
+      "Origin": "USA",
+      "Guidance": "Infrared Homing",
+      "Range": "~35 km (AIM-9X)",
+      "Speed": "Mach 2.5",
+      "Warhead": "9.4 kg annular blast-frag",
+      "Length": "3.02 m",
+    },
+  },
+  "AIM-120 Amraam": {
+    name: "AIM-120 AMRAAM",
+    class: "Medium-Range Air-to-Air Missile",
+    desc: "Advanced Medium-Range Air-to-Air Missile — active radar-homing, fire-and-forget BVR missile. NATO's primary air-to-air missile.",
+    stats: {
+      "Origin": "USA",
+      "Guidance": "Active Radar (+INS)",
+      "Range": "~160 km (AIM-120D)",
+      "Speed": "Mach 4",
+      "Warhead": "18 kg HE Blast-Frag",
+      "Length": "3.66 m",
+    },
+  },
+  "KS-172 Novator": {
+    name: "KS-172 / R-172",
+    class: "Very-Long-Range Air-to-Air Missile",
+    desc: "Russian two-stage, anti-AWACS very-long-range air-to-air missile developed by Novator. Designed to engage high-value support aircraft.",
+    stats: {
+      "Origin": "Russia",
+      "Guidance": "INS + Active Radar",
+      "Range": "~400 km",
+      "Speed": "Mach 4",
+      "Warhead": "50 kg HE",
+      "Length": "6.01 m",
+    },
+  },
+  "AIM-132 Asraam": {
+    name: "AIM-132 ASRAAM",
+    class: "Short-Range Air-to-Air Missile",
+    desc: "Advanced Short-Range Air-to-Air Missile — high-off-boresight IIR-guided dogfight missile used by the RAF, RAAF and others.",
+    stats: {
+      "Origin": "UK",
+      "Guidance": "Imaging Infrared",
+      "Range": "~50 km",
+      "Speed": "Mach 3+",
+      "Warhead": "10 kg HE Blast-Frag",
+      "Length": "2.9 m",
+    },
+  },
+};
+
+// Order in which weapons are arranged around the aircraft (anti-clockwise from front-right).
+export const WEAPON_ORDER = [
+  "AIM-9 Sidewinder",
+  "AIM-120 Amraam",
+  "AIM-132 Asraam",
+  "AIM-54 Phoenix",
+  "KS-172 Novator",
+  "AGM-154 JSOW",
+  "GBU-24 Paveway",
+  "Mk83 bomb",
+  "MBDA Brimstone",
+  "AGM65 Maverick",
+];
